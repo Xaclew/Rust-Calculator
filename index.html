@@ -20,8 +20,26 @@
             grid-template-columns: repeat(4, 1fr);
             gap: 10px;
         }
+        /* Base button styles applied to all calculator buttons */
         .calc-btn {
             @apply font-semibold py-3 rounded-xl transition duration-150 ease-in-out shadow-md active:shadow-inner;
+        }
+        /* Default colors for number/clear/delete buttons */
+        .calc-btn[data-type="number"], .calc-btn[data-type="delete"], .calc-btn[data-type="clear"] {
+             @apply bg-gray-200 hover:bg-gray-300 text-gray-800;
+        }
+        /* Specific overrides for color-coded buttons */
+        .calc-btn[data-type="equals"] {
+            @apply bg-indigo-600 text-white hover:bg-indigo-700;
+        }
+        .calc-btn[data-type="operator"] {
+             @apply text-indigo-600 bg-gray-200 hover:bg-indigo-100;
+        }
+        .calc-btn[data-type="delete"] {
+             @apply bg-red-500 text-white hover:bg-red-600;
+        }
+        .calc-btn[data-type="clear"] {
+             @apply bg-yellow-500 text-white hover:bg-yellow-600;
         }
     </style>
 </head>
@@ -38,49 +56,43 @@
         <!-- Calculator Buttons -->
         <div class="calculator-grid">
             <!-- First Row -->
-            <button class="calc-btn text-indigo-600" data-type="clear">C</button>
-            <button class="calc-btn text-indigo-600" data-type="operator" data-op="/">÷</button>
-            <button class="calc-btn text-indigo-600" data-type="operator" data-op="*">×</button>
-            <button class="calc-btn bg-indigo-600 text-white hover:bg-indigo-700" data-type="equals">=</button>
+            <button class="calc-btn" data-type="clear">C</button>
+            <button class="calc-btn" data-type="operator" data-op="/">÷</button>
+            <button class="calc-btn" data-type="operator" data-op="*">×</button>
+            <button class="calc-btn" data-type="delete">DEL</button>
             
             <!-- Number Rows -->
             <button class="calc-btn" data-type="number" data-value="7">7</button>
             <button class="calc-btn" data-type="number" data-value="8">8</button>
             <button class="calc-btn" data-type="number" data-value="9">9</button>
-            <button class="calc-btn text-indigo-600" data-type="operator" data-op="-">-</button>
+            <button class="calc-btn" data-type="operator" data-op="-">-</button>
             
             <button class="calc-btn" data-type="number" data-value="4">4</button>
             <button class="calc-btn" data-type="number" data-value="5">5</button>
             <button class="calc-btn" data-type="number" data-value="6">6</button>
-            <button class="calc-btn text-indigo-600" data-type="operator" data-op="+">+</button>
+            <button class="calc-btn" data-type="operator" data-op="+">+</button>
 
             <button class="calc-btn" data-type="number" data-value="1">1</button>
             <button class="calc-btn" data-type="number" data-value="2">2</button>
             <button class="calc-btn" data-type="number" data-value="3">3</button>
+            <button class="calc-btn col-span-1" data-type="equals">=</button>
             
             <!-- Bottom Row -->
-            <button class="calc-btn col-span-2" data-type="number" data-value="0">0</button>
+            <button class="calc-btn col-span-3" data-type="number" data-value="0">0</button>
             <button class="calc-btn" data-type="number" data-value=".">.</button>
-            <button class="calc-btn bg-red-500 text-white hover:bg-red-600" data-type="delete">DEL</button>
         </div>
     </div>
 
-    <!-- JavaScript/TypeScript Logic for Wasm Interaction -->
+    <!-- JavaScript Logic for Wasm Interaction -->
     <script type="module">
-        // The HTML file imports the generated JavaScript glue code from the 'pkg' directory.
-        // This file (wasm-calculator.js) asynchronously loads and initializes the .wasm binary.
-        
-        // We use a promise to ensure the Wasm module is loaded before we try to use its functions.
-        const WasmModulePromise = import('./wasm-calculator/pkg/wasm_calculator.js').then(module => {
-            // The 'default' function is the initializer for wasm-bindgen.
-            module.default();
-            return module;
-        });
-        
+        // Import the Wasm initializer and the exported functions/enums
+        import init, { calculate, Operation } from './wasm-calculator/pkg/wasm_calculator.js';
+
+        // --- DOM elements ---
         const display = document.getElementById('display');
         const buttons = document.querySelectorAll('.calc-btn');
 
-        // Calculator State
+        // --- Calculator State ---
         let currentInput = '0';
         let previousValue = null;
         let operation = null;
@@ -95,7 +107,9 @@
         };
 
         function updateDisplay(value) {
-            display.textContent = value;
+            // Prevent display overflow for very long numbers
+            const formattedValue = value.length > 15 ? parseFloat(value).toPrecision(10) : value;
+            display.textContent = formattedValue;
         }
 
         function clear() {
@@ -106,7 +120,7 @@
             updateDisplay(currentInput);
         }
 
-        async function handleNumber(value) {
+        function handleNumber(value) {
             if (waitingForSecondOperand || currentInput === '0') {
                 currentInput = value === '.' ? '0.' : value;
                 waitingForSecondOperand = false;
@@ -119,8 +133,8 @@
         }
 
         async function handleOperator(op) {
-            const module = await WasmModulePromise;
-            
+            if (display.textContent === "Wasm Load Error") return;
+
             const inputValue = parseFloat(currentInput);
 
             if (previousValue === null) {
@@ -128,16 +142,16 @@
                 operation = op;
                 waitingForSecondOperand = true;
                 currentInput = '0';
-                updateDisplay(inputValue);
+                updateDisplay(inputValue.toString());
                 return;
             }
 
             if (operation && !waitingForSecondOperand) {
                 // Calculate result using Rust Wasm
-                const result = module.calculate(
+                const result = calculate(
                     previousValue, 
                     inputValue, 
-                    module.Operation[RustOperation[operation]] // Pass the Rust enum variant
+                    Operation[RustOperation[operation]] // Pass the Rust enum variant
                 );
 
                 previousValue = result;
@@ -145,27 +159,24 @@
                 waitingForSecondOperand = true;
                 currentInput = '0';
                 
-                // Format and display the result
-                const formattedResult = result.toString();
-                updateDisplay(formattedResult);
+                updateDisplay(result.toString());
             } else if (previousValue !== null && op) {
-                // If we press a new operator without a second number, just switch the operator
+                // Just switch the operator if a new one is pressed
                 operation = op;
-                updateDisplay(previousValue);
+                updateDisplay(previousValue.toString());
             }
         }
 
         async function handleEquals() {
-            if (previousValue === null || waitingForSecondOperand) return;
+            if (previousValue === null || waitingForSecondOperand || operation === null || display.textContent === "Wasm Load Error") return;
 
-            const module = await WasmModulePromise;
             const inputValue = parseFloat(currentInput);
 
             // Calculate final result using Rust Wasm
-            const result = module.calculate(
+            const result = calculate(
                 previousValue, 
                 inputValue, 
-                module.Operation[RustOperation[operation]] // Pass the Rust enum variant
+                Operation[RustOperation[operation]] // Pass the Rust enum variant
             );
 
             // Reset state for next calculation
@@ -178,7 +189,7 @@
         }
 
         function handleDelete() {
-            if (currentInput.length > 1) {
+            if (currentInput.length > 1 && !waitingForSecondOperand) {
                 currentInput = currentInput.slice(0, -1);
             } else {
                 currentInput = '0';
@@ -187,7 +198,7 @@
             updateDisplay(currentInput);
         }
 
-        // Set up event listeners for all buttons
+        // --- Event Listener Setup ---
         buttons.forEach(button => {
             button.addEventListener('click', () => {
                 const type = button.dataset.type;
@@ -212,14 +223,15 @@
                         break;
                 }
             });
-            // Tailwind classes for buttons are now applied in the <style> block for cleaner HTML
         });
-
-        // Initialize display once Wasm is ready
-        WasmModulePromise.then(() => {
+        
+        // --- Wasm Initialization ---
+        // We call the init function to load the WASM binary asynchronously.
+        init('./wasm-calculator/pkg/wasm_calculator_bg.wasm').then(() => {
+            console.log("Wasm module loaded successfully.");
             updateDisplay('0');
         }).catch(e => {
-            console.error("Failed to load Wasm module:", e);
+            console.error("WASM Initialization Error:", e);
             display.textContent = "Wasm Load Error";
         });
 
