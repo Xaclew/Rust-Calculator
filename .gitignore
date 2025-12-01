@@ -1,0 +1,7 @@
+Build artifacts
+
+/target/
+
+wasm-pack output directory
+
+/wasm-calculator/pkg/

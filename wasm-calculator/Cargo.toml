@@ -1,0 +1,17 @@
+[package]
+name = "wasm-calculator"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <you@example.com>"]
+description = "Calculator logic compiled to WebAssembly."
+license = "MIT/Apache-2.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+[dependencies.web-sys]
+version = "0.3"
+features = ["console"]

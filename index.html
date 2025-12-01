@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rust Wasm Calculator</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        /* Custom styling for the calculator display */
+        #display {
+            min-height: 2.5rem;
+        }
+        .calculator-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+        .calc-btn {
+            @apply font-semibold py-3 rounded-xl transition duration-150 ease-in-out shadow-md active:shadow-inner;
+        }
+    </style>
+</head>
+<body class="p-4 flex items-center justify-center min-h-screen">
+    <div id="app" class="bg-white p-6 rounded-xl shadow-2xl max-w-sm w-full border-t-4 border-indigo-600">
+        <h1 class="text-3xl font-bold mb-4 text-gray-800">Wasm Calculator</h1>
+        <p class="text-sm text-indigo-500 mb-6">Logic powered by Rust 🦀</p>
+
+        <!-- Display Area -->
+        <div id="display" class="bg-gray-100 text-right p-4 mb-4 rounded-lg text-3xl font-mono overflow-x-auto whitespace-nowrap text-gray-800 shadow-inner">
+            0
+        </div>
+
+        <!-- Calculator Buttons -->
+        <div class="calculator-grid">
+            <!-- First Row -->
+            <button class="calc-btn text-indigo-600" data-type="clear">C</button>
+            <button class="calc-btn text-indigo-600" data-type="operator" data-op="/">÷</button>
+            <button class="calc-btn text-indigo-600" data-type="operator" data-op="*">×</button>
+            <button class="calc-btn bg-indigo-600 text-white hover:bg-indigo-700" data-type="equals">=</button>
+            
+            <!-- Number Rows -->
+            <button class="calc-btn" data-type="number" data-value="7">7</button>
+            <button class="calc-btn" data-type="number" data-value="8">8</button>
+            <button class="calc-btn" data-type="number" data-value="9">9</button>
+            <button class="calc-btn text-indigo-600" data-type="operator" data-op="-">-</button>
+            
+            <button class="calc-btn" data-type="number" data-value="4">4</button>
+            <button class="calc-btn" data-type="number" data-value="5">5</button>
+            <button class="calc-btn" data-type="number" data-value="6">6</button>
+            <button class="calc-btn text-indigo-600" data-type="operator" data-op="+">+</button>
+
+            <button class="calc-btn" data-type="number" data-value="1">1</button>
+            <button class="calc-btn" data-type="number" data-value="2">2</button>
+            <button class="calc-btn" data-type="number" data-value="3">3</button>
+            
+            <!-- Bottom Row -->
+            <button class="calc-btn col-span-2" data-type="number" data-value="0">0</button>
+            <button class="calc-btn" data-type="number" data-value=".">.</button>
+            <button class="calc-btn bg-red-500 text-white hover:bg-red-600" data-type="delete">DEL</button>
+        </div>
+    </div>
+
+    <!-- JavaScript/TypeScript Logic for Wasm Interaction -->
+    <script type="module">
+        // The HTML file imports the generated JavaScript glue code from the 'pkg' directory.
+        // This file (wasm-calculator.js) asynchronously loads and initializes the .wasm binary.
+        
+        // We use a promise to ensure the Wasm module is loaded before we try to use its functions.
+        const WasmModulePromise = import('./wasm-calculator/pkg/wasm_calculator.js').then(module => {
+            // The 'default' function is the initializer for wasm-bindgen.
+            module.default();
+            return module;
+        });
+        
+        const display = document.getElementById('display');
+        const buttons = document.querySelectorAll('.calc-btn');
+
+        // Calculator State
+        let currentInput = '0';
+        let previousValue = null;
+        let operation = null;
+        let waitingForSecondOperand = true;
+
+        // Map UI operator symbols to Rust enum names exposed by Wasm
+        const RustOperation = {
+            '+': 'Add',
+            '-': 'Subtract',
+            '*': 'Multiply',
+            '/': 'Divide',
+        };
+
+        function updateDisplay(value) {
+            display.textContent = value;
+        }
+
+        function clear() {
+            currentInput = '0';
+            previousValue = null;
+            operation = null;
+            waitingForSecondOperand = true;
+            updateDisplay(currentInput);
+        }
+
+        async function handleNumber(value) {
+            if (waitingForSecondOperand || currentInput === '0') {
+                currentInput = value === '.' ? '0.' : value;
+                waitingForSecondOperand = false;
+            } else if (value === '.' && !currentInput.includes('.')) {
+                currentInput += value;
+            } else if (value !== '.') {
+                currentInput += value;
+            }
+            updateDisplay(currentInput);
+        }
+
+        async function handleOperator(op) {
+            const module = await WasmModulePromise;
+            
+            const inputValue = parseFloat(currentInput);
+
+            if (previousValue === null) {
+                previousValue = inputValue;
+                operation = op;
+                waitingForSecondOperand = true;
+                currentInput = '0';
+                updateDisplay(inputValue);
+                return;
+            }
+
+            if (operation && !waitingForSecondOperand) {
+                // Calculate result using Rust Wasm
+                const result = module.calculate(
+                    previousValue, 
+                    inputValue, 
+                    module.Operation[RustOperation[operation]] // Pass the Rust enum variant
+                );
+
+                previousValue = result;
+                operation = op;
+                waitingForSecondOperand = true;
+                currentInput = '0';
+                
+                // Format and display the result
+                const formattedResult = result.toString();
+                updateDisplay(formattedResult);
+            } else if (previousValue !== null && op) {
+                // If we press a new operator without a second number, just switch the operator
+                operation = op;
+                updateDisplay(previousValue);
+            }
+        }
+
+        async function handleEquals() {
+            if (previousValue === null || waitingForSecondOperand) return;
+
+            const module = await WasmModulePromise;
+            const inputValue = parseFloat(currentInput);
+
+            // Calculate final result using Rust Wasm
+            const result = module.calculate(
+                previousValue, 
+                inputValue, 
+                module.Operation[RustOperation[operation]] // Pass the Rust enum variant
+            );
+
+            // Reset state for next calculation
+            currentInput = result.toString();
+            previousValue = null;
+            operation = null;
+            waitingForSecondOperand = true;
+            
+            updateDisplay(currentInput);
+        }
+
+        function handleDelete() {
+            if (currentInput.length > 1) {
+                currentInput = currentInput.slice(0, -1);
+            } else {
+                currentInput = '0';
+            }
+            waitingForSecondOperand = false;
+            updateDisplay(currentInput);
+        }
+
+        // Set up event listeners for all buttons
+        buttons.forEach(button => {
+            button.addEventListener('click', () => {
+                const type = button.dataset.type;
+                const value = button.dataset.value;
+                const op = button.dataset.op;
+
+                switch (type) {
+                    case 'number':
+                        handleNumber(value);
+                        break;
+                    case 'operator':
+                        handleOperator(op);
+                        break;
+                    case 'equals':
+                        handleEquals();
+                        break;
+                    case 'clear':
+                        clear();
+                        break;
+                    case 'delete':
+                        handleDelete();
+                        break;
+                }
+            });
+            // Tailwind classes for buttons are now applied in the <style> block for cleaner HTML
+        });
+
+        // Initialize display once Wasm is ready
+        WasmModulePromise.then(() => {
+            updateDisplay('0');
+        }).catch(e => {
+            console.error("Failed to load Wasm module:", e);
+            display.textContent = "Wasm Load Error";
+        });
+
+    </script>
+</body>
+</html>
